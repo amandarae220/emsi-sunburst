@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Sunburst Chart – EMSI Data (Generation → Occupation) with Wrapped Labels</title>
+  <title>Sunburst Chart – EMSI Data (Generation → Occupation) with Centered Wrapped Labels</title>
   <!-- Load d3.js -->
   <script src="https://d3js.org/d3.v6.min.js"></script>
   <!-- (Optional) Load the Tableau Extensions API -->
@@ -43,7 +43,7 @@
 </head>
 <body>
   <h2>Sunburst Chart: Generation (Inner Ring) → Occupation (Outer Ring)</h2>
-  <p>This visualization groups jobs by Generation and Occupation (using 2013 Jobs) with wrapped labels that only display when enough space is available.</p>
+  <p>This visualization groups jobs by Generation and Occupation (using 2013 Jobs) with centered, wrapped labels that display only if enough space is available.</p>
   <div class="chart-container">
     <svg id="sunburst" width="700" height="700"></svg>
     <div class="tooltip" id="tooltip"></div>
@@ -106,7 +106,7 @@
     }
 
     // -------------------------------------------------------------------
-    // 3) Draw the Sunburst (with wrapped labels)
+    // 3) Draw the Sunburst (with centered, wrapped labels)
     // -------------------------------------------------------------------
     function drawSunburst(data) {
       const root = d3.hierarchy(data)
@@ -163,8 +163,8 @@
         .each(function(d) {
           // Skip the root and very small arcs
           if (d.depth === 0) return;
+          // Compute available arc length at mid-radius using the original layout values.
           const midRadius = (d.y0 + d.y1) / 2;
-          // Compute available arc length at the midRadius.
           const availableWidth = (d.x1 - d.x0) * midRadius;
           if (availableWidth < minLabelWidth) {
             d3.select(this).remove();
@@ -179,14 +179,15 @@
     // -------------------------------------------------------------------
     // 4) Helper Functions for Label Positioning and Wrapping
     // -------------------------------------------------------------------
-    // Calculate label transform for positioning along the arc.
+    // New label transform function using arc.centroid for better centering.
     function labelTransform(d) {
-      // Compute the midpoint angle in degrees.
-      const midAngle = (d.x0 + d.x1) / 2 * 180 / Math.PI;
-      // Compute the midpoint radius.
-      const r = (d.y0 + d.y1) / 2;
-      // Rotate text so that it follows the arc.
-      return `rotate(${midAngle - 90}) translate(${r},0) ${midAngle > 180 ? "rotate(180)" : ""}`;
+      // Compute the centroid of the arc.
+      var centroid = arc.centroid(d);
+      // Compute the angle of the centroid in degrees.
+      var angle = Math.atan2(centroid[1], centroid[0]) * 180 / Math.PI;
+      // Adjust the angle so the text is not upside down.
+      if (angle > 90 || angle < -90) { angle += 180; }
+      return "translate(" + centroid[0] + "," + centroid[1] + ") rotate(" + angle + ")";
     }
 
     // Wrap text for labels so that they don't overflow the arc.
