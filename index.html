@@ -216,7 +216,7 @@
     // -------------------------------------------------------------------
     function loadDataAndRender() {
       // Update this URL to match your GitHub Pages CSV location:
-      d3.csv("https://amandarae220.github.io/emsi-sunburst/data.csv").then(rawData => {
+      d3.csv("data.csv").then(rawData => {
         const parsed = rawData.map(d => ({
           generation: d["Generation"] || "Unknown",
           occupation: d["Occupation"] || "Unknown",
