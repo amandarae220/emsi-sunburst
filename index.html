@@ -37,13 +37,13 @@
       fill: white;
       font-size: 12px;
       text-anchor: middle;
-      pointer-events: none; /* so text doesn't block mouse events on arcs */
+      pointer-events: none;
     }
   </style>
 </head>
 <body>
   <h2>Sunburst Chart: Generation (Inner Ring) → Occupation (Outer Ring)</h2>
-  <p>This visualization groups jobs by Generation and Occupation (using 2013 Jobs) with wrapped labels.</p>
+  <p>This visualization groups jobs by Generation and Occupation (using 2013 Jobs) with wrapped labels that only display when enough space is available.</p>
   <div class="chart-container">
     <svg id="sunburst" width="700" height="700"></svg>
     <div class="tooltip" id="tooltip"></div>
@@ -75,6 +75,9 @@
 
     // Color scale (customize as needed)
     const color = d3.scaleOrdinal(d3.schemeCategory10);
+
+    // Define a minimum available width (in pixels) required for a label.
+    const minLabelWidth = 12;
 
     // -------------------------------------------------------------------
     // 2) Build Hierarchy from CSV Data
@@ -152,40 +155,41 @@
           }
         });
 
-      // Add labels with wrapping
+      // Add labels with wrapping if there is enough available space.
       arcsGroup.append("text")
         .attr("class", "arc-label")
-        .attr("transform", d => labelTransform(d))
         .attr("dy", "0.35em")
+        .attr("transform", d => labelTransform(d))
         .each(function(d) {
           // Skip the root and very small arcs
           if (d.depth === 0) return;
-          const angle = d.x1 - d.x0;
-          if (angle < 0.01) return;
+          const midRadius = (d.y0 + d.y1) / 2;
+          // Compute available arc length at the midRadius.
+          const availableWidth = (d.x1 - d.x0) * midRadius;
+          if (availableWidth < minLabelWidth) {
+            d3.select(this).remove();
+            return;
+          }
           const labelText = d.data.name;
-          // Compute available width along the arc
-          const r = (d.y0 + d.y1) / 2;
-          const availableWidth = angle * r - 4; // subtract a few pixels for padding
-          const textElem = d3.select(this);
-          textElem.text(labelText);
+          const textElem = d3.select(this).text(labelText);
           wrap(textElem, availableWidth);
         });
     }
 
     // -------------------------------------------------------------------
-    // Helper Functions
+    // 4) Helper Functions for Label Positioning and Wrapping
     // -------------------------------------------------------------------
-    // Calculate label transform for positioning along the arc
+    // Calculate label transform for positioning along the arc.
     function labelTransform(d) {
-      const angle = (d.x0 + d.x1) / 2;
-      const rotate = (angle * 180 / Math.PI) - 90;
+      // Compute the midpoint angle in degrees.
+      const midAngle = (d.x0 + d.x1) / 2 * 180 / Math.PI;
+      // Compute the midpoint radius.
       const r = (d.y0 + d.y1) / 2;
-      const flip = rotate < 180 ? 0 : 180;
-      return `rotate(${rotate}) translate(${r},0) rotate(${flip})`;
+      // Rotate text so that it follows the arc.
+      return `rotate(${midAngle - 90}) translate(${r},0) ${midAngle > 180 ? "rotate(180)" : ""}`;
     }
 
     // Wrap text for labels so that they don't overflow the arc.
-    // This function creates tspans for each line if needed.
     function wrap(text, width) {
       text.each(function() {
         var textElem = d3.select(this),
@@ -212,24 +216,23 @@
     }
 
     // -------------------------------------------------------------------
-    // 4) Load CSV and Render
+    // 5) Load CSV and Render the Chart
     // -------------------------------------------------------------------
     function loadDataAndRender() {
-      // Update this URL to match your GitHub Pages CSV location:
+      // Use a relative URL if the CSV is in the same repository.
       d3.csv("data.csv").then(rawData => {
         const parsed = rawData.map(d => ({
           generation: d["Generation"] || "Unknown",
           occupation: d["Occupation"] || "Unknown",
           jobs2013: +String(d["2013 Jobs"]).replace(/,/g, "")
         }));
-
         const hierarchyData = buildHierarchy(parsed);
         drawSunburst(hierarchyData);
       });
     }
 
     // -------------------------------------------------------------------
-    // 5) (Optional) Tableau Extensions – Two‐Way Filtering
+    // 6) (Optional) Tableau Extensions – Two‐Way Filtering
     // -------------------------------------------------------------------
     const tableauEnv = {
       isTableau: false,
@@ -274,7 +277,7 @@
     }
 
     // -------------------------------------------------------------------
-    // 6) Initialize
+    // 7) Initialize
     // -------------------------------------------------------------------
     loadDataAndRender();
     setupTableauExtension();
