@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Sunburst Chart – EMSI Data (Generation → Occupation)</title>
+  <!-- Load d3.js -->
+  <script src="https://d3js.org/d3.v6.min.js"></script>
+  <!-- (Optional) Load the Tableau Extensions API -->
+  <script src="https://tableau.github.io/extensions-api/tableau.extensions.1.latest.js"></script>
+  <style>
+    body {
+      font-family: sans-serif;
+      margin: 20px;
+    }
+    .chart-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .arc {
+      cursor: pointer;
+      stroke: #fff;
+      stroke-width: 1px;
+    }
+    .tooltip {
+      position: absolute;
+      text-align: center;
+      padding: 6px;
+      font: 12px sans-serif;
+      background: lightsteelblue;
+      border-radius: 4px;
+      pointer-events: none;
+      opacity: 0;
+    }
+  </style>
+</head>
+<body>
+  <h2>Sunburst Chart: Generation (Inner Ring) → Occupation (Outer Ring)</h2>
+  <p>This visualization groups jobs by Generation and Occupation using the 2013 Jobs column.</p>
+  <div class="chart-container">
+    <svg id="sunburst" width="700" height="700"></svg>
+    <div class="tooltip" id="tooltip"></div>
+  </div>
+
+  <script>
+    // -------------------------------------------------------------------
+    // 1) Sunburst Layout Setup
+    // -------------------------------------------------------------------
+    const width = 700,
+          height = 700,
+          radius = Math.min(width, height) / 2;
+
+    const svg = d3.select("#sunburst")
+                  .attr("viewBox", [-width / 2, -height / 2, width, height]);
+
+    const tooltip = d3.select("#tooltip");
+
+    // Create a partition layout
+    const partition = d3.partition()
+      .size([2 * Math.PI, radius]);
+
+    // Create an arc generator
+    const arc = d3.arc()
+      .startAngle(d => d.x0)
+      .endAngle(d => d.x1)
+      .innerRadius(d => d.y0)
+      .outerRadius(d => d.y1);
+
+    // Color scale (you can customize as needed)
+    const color = d3.scaleOrdinal(d3.schemeCategory10);
+
+    // -------------------------------------------------------------------
+    // 2) Build Hierarchy from CSV Data
+    // -------------------------------------------------------------------
+    function buildHierarchy(csvData) {
+      // We'll group by Generation -> Occupation
+      // Summing the "2013 Jobs" column (make sure to parse it as a number).
+
+      // Step A: Create a nested map: { Generation -> { Occupation -> totalJobs } }
+      const nestedMap = d3.rollup(
+        csvData,
+        v => d3.sum(v, d => d.jobs2013),         // aggregator
+        d => d.generation,                       // first grouping: Generation
+        d => d.occupation                        // second grouping: Occupation
+      );
+
+      // Step B: Convert nestedMap into a hierarchical object
+      // Root node
+      const root = { name: "All Jobs", children: [] };
+
+      for (const [genKey, occMap] of nestedMap.entries()) {
+        const genNode = { name: genKey, children: [] };
+        for (const [occKey, totalJobs] of occMap.entries()) {
+          genNode.children.push({
+            name: occKey,
+            value: totalJobs
+          });
+        }
+        root.children.push(genNode);
+      }
+
+      return root;
+    }
+
+    // -------------------------------------------------------------------
+    // 3) Draw the Sunburst
+    // -------------------------------------------------------------------
+    function drawSunburst(data) {
+      // Convert data to a d3 hierarchy, sum the values, and partition it
+      const root = d3.hierarchy(data)
+                     .sum(d => d.value);
+
+      partition(root); // mutates root, adding x0, x1, y0, y1
+
+      // Bind data to arcs
+      const arcs = svg.selectAll("path")
+        .data(root.descendants())
+        .join("path")
+        .attr("class", "arc")
+        .attr("fill", d => {
+          // Use generation-level color for the first ring,
+          // and a variation for the second ring if desired
+          const depth = d.depth; // 0=All Jobs, 1=Generation, 2=Occupation
+          return depth === 1
+            ? color(d.data.name)
+            : depth === 2
+              ? color(d.parent.data.name)
+              : "#ccc"; // Root color
+        })
+        .attr("d", arc)
+        .on("mouseover", function(event, d) {
+          // Show tooltip
+          tooltip.style("opacity", 1);
+          const generation = (d.depth === 2) ? d.parent.data.name : d.data.name;
+          const occupation = (d.depth === 2) ? d.data.name : "";
+          const jobs = d.value ? d.value.toLocaleString() : "";
+          tooltip.html(`
+            <strong>${generation}</strong><br/>
+            ${occupation ? occupation + "<br/>" : ""}
+            Jobs: ${jobs}
+          `)
+          .style("left", (event.pageX + 10) + "px")
+          .style("top", (event.pageY + 10) + "px");
+        })
+        .on("mousemove", function(event) {
+          // Move tooltip
+          tooltip.style("left", (event.pageX + 10) + "px")
+                 .style("top", (event.pageY + 10) + "px");
+        })
+        .on("mouseout", function() {
+          // Hide tooltip
+          tooltip.style("opacity", 0);
+        })
+        .on("click", function(event, d) {
+          // (Optional) If integrating with Tableau, apply a filter
+          // e.g. if d.depth === 2, filter on d.data.name (Occupation)
+          // or if d.depth === 1, filter on d.data.name (Generation)
+          if (tableauEnv.isTableau) {
+            applyTableauFilter(d);
+          }
+        });
+    }
+
+    // -------------------------------------------------------------------
+    // 4) Load CSV and Render
+    // -------------------------------------------------------------------
+    function loadDataAndRender() {
+      d3.csv("data.csv").then(rawData => {
+        // Parse CSV columns
+        // Example row:
+        // {
+        //   "First 2 of SOC": "11",
+        //   "SOC": "11-0000",
+        //   "Occupation": "Management Occupations",
+        //   "Generation": "Baby Boomer",
+        //   "2007 Jobs": "1465399",
+        //   "2013 Jobs": "1506812",
+        //   ...
+        // }
+        const parsed = rawData.map(d => {
+          return {
+            generation: d["Generation"] || "Unknown",
+            occupation: d["Occupation"] || "Unknown",
+            jobs2013: +String(d["2013 Jobs"]).replace(/,/g, "") // remove commas, parse number
+          };
+        });
+
+        // Build hierarchical structure
+        const hierarchyData = buildHierarchy(parsed);
+
+        // Draw the sunburst
+        drawSunburst(hierarchyData);
+      });
+    }
+
+    // -------------------------------------------------------------------
+    // 5) (Optional) Tableau Extensions – Two‐Way Filtering
+    // -------------------------------------------------------------------
+    const tableauEnv = {
+      isTableau: false,    // Will be true if we detect we are in a Tableau environment
+      worksheet: null
+    };
+
+    function applyTableauFilter(d) {
+      // Example: if the user clicks on a Generation-level arc,
+      // filter by that Generation in Tableau. If they click on an Occupation-level arc,
+      // filter by that Occupation. Adjust as needed for your data.
+      const depth = d.depth;
+      let filterField = null;
+      let filterValue = null;
+
+      if (depth === 1) {
+        filterField = "Generation";   // matches the data column name in Tableau
+        filterValue = d.data.name;
+      } else if (depth === 2) {
+        filterField = "Occupation";
+        filterValue = d.data.name;
+      } else {
+        return; // Root node or unknown
+      }
+
+      // Apply the filter if we have a valid worksheet reference
+      if (tableauEnv.worksheet && filterField && filterValue) {
+        tableauEnv.worksheet.applyFilterAsync(
+          filterField,
+          filterValue,
+          tableau.FilterUpdateType.Replace
+        ).then(() => {
+          console.log(`Applied filter: ${filterField} = ${filterValue}`);
+        }).catch(err => console.error("Error applying filter:", err));
+      }
+    }
+
+    function updateFromTableau(event) {
+      // This function could re-load data with certain filters,
+      // or interpret the event to see what filter changed in Tableau.
+      console.log("Received Tableau filter event:", event);
+      // For simplicity, just re-draw with no additional filtering:
+      loadDataAndRender();
+    }
+
+    function setupTableauExtension() {
+      if (typeof tableau === "undefined") {
+        console.log("Not in a Tableau environment (or test mode).");
+        return;
+      }
+      tableau.extensions.initializeAsync().then(() => {
+        tableauEnv.isTableau = true;
+        const dashboard = tableau.extensions.dashboardContent.dashboard;
+        // Example: Use the first worksheet
+        tableauEnv.worksheet = dashboard.worksheets[0];
+
+        // Listen for filter changes
+        dashboard.worksheets.forEach(ws => {
+          ws.addEventListener(tableau.TableauEventType.FilterChanged, updateFromTableau);
+        });
+      });
+    }
+
+    // -------------------------------------------------------------------
+    // 6) Initialize
+    // -------------------------------------------------------------------
+    loadDataAndRender();
+    setupTableauExtension();
+  </script>
+</body>
+</html>
