@@ -32,11 +32,18 @@
       pointer-events: none;
       opacity: 0;
     }
+    /* White text for labels */
+    .arc-label {
+      fill: white;
+      font-size: 12px;
+      text-anchor: middle;
+      pointer-events: none; /* so text doesn't block mouse events on arcs */
+    }
   </style>
 </head>
 <body>
   <h2>Sunburst Chart: Generation (Inner Ring) → Occupation (Outer Ring)</h2>
-  <p>This visualization groups jobs by Generation and Occupation using the 2013 Jobs column.</p>
+  <p>This visualization groups jobs by Generation and Occupation using the 2013 Jobs column. Now with labels!</p>
   <div class="chart-container">
     <svg id="sunburst" width="700" height="700"></svg>
     <div class="tooltip" id="tooltip"></div>
@@ -73,19 +80,15 @@
     // 2) Build Hierarchy from CSV Data
     // -------------------------------------------------------------------
     function buildHierarchy(csvData) {
-      // We'll group by Generation -> Occupation
-      // Summing the "2013 Jobs" column (make sure to parse it as a number).
-
-      // Step A: Create a nested map: { Generation -> { Occupation -> totalJobs } }
+      // We'll group by Generation -> Occupation, summing "2013 Jobs".
       const nestedMap = d3.rollup(
         csvData,
-        v => d3.sum(v, d => d.jobs2013),         // aggregator
-        d => d.generation,                       // first grouping: Generation
-        d => d.occupation                        // second grouping: Occupation
+        v => d3.sum(v, d => d.jobs2013),
+        d => d.generation,    // first grouping: Generation
+        d => d.occupation     // second grouping: Occupation
       );
 
-      // Step B: Convert nestedMap into a hierarchical object
-      // Root node
+      // Convert nestedMap into a hierarchical object
       const root = { name: "All Jobs", children: [] };
 
       for (const [genKey, occMap] of nestedMap.entries()) {
@@ -98,12 +101,11 @@
         }
         root.children.push(genNode);
       }
-
       return root;
     }
 
     // -------------------------------------------------------------------
-    // 3) Draw the Sunburst
+    // 3) Draw the Sunburst (with labels)
     // -------------------------------------------------------------------
     function drawSunburst(data) {
       // Convert data to a d3 hierarchy, sum the values, and partition it
@@ -112,20 +114,20 @@
 
       partition(root); // mutates root, adding x0, x1, y0, y1
 
-      // Bind data to arcs
-      const arcs = svg.selectAll("path")
+      // Group arcs + labels together
+      const arcsGroup = svg.selectAll("g.arc-group")
         .data(root.descendants())
-        .join("path")
+        .join("g")
+        .attr("class", "arc-group");
+
+      // Draw arcs
+      arcsGroup.append("path")
         .attr("class", "arc")
         .attr("fill", d => {
-          // Use generation-level color for the first ring,
-          // and a variation for the second ring if desired
-          const depth = d.depth; // 0=All Jobs, 1=Generation, 2=Occupation
-          return depth === 1
-            ? color(d.data.name)
-            : depth === 2
-              ? color(d.parent.data.name)
-              : "#ccc"; // Root color
+          // Depth 0=All Jobs, 1=Generation, 2=Occupation
+          if (d.depth === 1) return color(d.data.name);     // Generation
+          if (d.depth === 2) return color(d.parent.data.name); // Occupation uses parent's color
+          return "#ccc"; // Root node color
         })
         .attr("d", arc)
         .on("mouseover", function(event, d) {
@@ -152,36 +154,52 @@
           tooltip.style("opacity", 0);
         })
         .on("click", function(event, d) {
-          // (Optional) If integrating with Tableau, apply a filter
-          // e.g. if d.depth === 2, filter on d.data.name (Occupation)
-          // or if d.depth === 1, filter on d.data.name (Generation)
+          // (Optional) Apply a Tableau filter if integrating with the Extensions API
           if (tableauEnv.isTableau) {
             applyTableauFilter(d);
           }
         });
+
+      // --- Add labels in white text ---
+      arcsGroup.append("text")
+        .attr("class", "arc-label")
+        .attr("transform", d => labelTransform(d))
+        .attr("dy", "0.35em")
+        .text(d => {
+          // Skip labeling the root or extremely small arcs
+          if (d.depth === 0) return "";
+          // If the arc angle is too small, skip the label to avoid clutter
+          const angle = d.x1 - d.x0;
+          if (angle < 0.01) return "";
+          return d.data.name;
+        });
+    }
+
+    // Helper function for label positioning
+    function labelTransform(d) {
+      // Center angle in radians
+      const angle = (d.x0 + d.x1) / 2;
+      // Convert to degrees and rotate so "midpoint" is at -90
+      const rotate = (angle * 180 / Math.PI) - 90;
+      // Radius is halfway between inner and outer
+      const r = (d.y0 + d.y1) / 2;
+      // If rotate >= 180, flip the text to avoid upside-down labels
+      const flip = rotate < 180 ? 0 : 180;
+      return `rotate(${rotate}) translate(${r},0) rotate(${flip})`;
     }
 
     // -------------------------------------------------------------------
     // 4) Load CSV and Render
     // -------------------------------------------------------------------
     function loadDataAndRender() {
-        d3.csv("https://amandarae220.github.io/emsi-sunburst/data.csv").then(rawData => {
+      // Replace the URL with your own GitHub Pages CSV path if needed:
+      d3.csv("https://amandarae220.github.io/emsi-sunburst/data.csv").then(rawData => {
         // Parse CSV columns
-        // Example row:
-        // {
-        //   "First 2 of SOC": "11",
-        //   "SOC": "11-0000",
-        //   "Occupation": "Management Occupations",
-        //   "Generation": "Baby Boomer",
-        //   "2007 Jobs": "1465399",
-        //   "2013 Jobs": "1506812",
-        //   ...
-        // }
         const parsed = rawData.map(d => {
           return {
             generation: d["Generation"] || "Unknown",
             occupation: d["Occupation"] || "Unknown",
-            jobs2013: +String(d["2013 Jobs"]).replace(/,/g, "") // remove commas, parse number
+            jobs2013: +String(d["2013 Jobs"]).replace(/,/g, "") // parse "2013 Jobs" as number
           };
         });
 
@@ -197,30 +215,28 @@
     // 5) (Optional) Tableau Extensions – Two‐Way Filtering
     // -------------------------------------------------------------------
     const tableauEnv = {
-      isTableau: false,    // Will be true if we detect we are in a Tableau environment
+      isTableau: false,
       worksheet: null
     };
 
     function applyTableauFilter(d) {
-      // Example: if the user clicks on a Generation-level arc,
-      // filter by that Generation in Tableau. If they click on an Occupation-level arc,
-      // filter by that Occupation. Adjust as needed for your data.
+      // Example logic: if user clicks a Generation-level arc, filter on "Generation".
+      // If Occupation-level arc, filter on "Occupation".
       const depth = d.depth;
       let filterField = null;
       let filterValue = null;
 
       if (depth === 1) {
-        filterField = "Generation";   // matches the data column name in Tableau
+        filterField = "Generation";
         filterValue = d.data.name;
       } else if (depth === 2) {
         filterField = "Occupation";
         filterValue = d.data.name;
       } else {
-        return; // Root node or unknown
+        return; // skip root
       }
 
-      // Apply the filter if we have a valid worksheet reference
-      if (tableauEnv.worksheet && filterField && filterValue) {
+      if (tableauEnv.worksheet) {
         tableauEnv.worksheet.applyFilterAsync(
           filterField,
           filterValue,
@@ -232,16 +248,14 @@
     }
 
     function updateFromTableau(event) {
-      // This function could re-load data with certain filters,
-      // or interpret the event to see what filter changed in Tableau.
+      // Re-load data or parse the event for more specific filtering
       console.log("Received Tableau filter event:", event);
-      // For simplicity, just re-draw with no additional filtering:
       loadDataAndRender();
     }
 
     function setupTableauExtension() {
       if (typeof tableau === "undefined") {
-        console.log("Not in a Tableau environment (or test mode).");
+        console.log("Not in a Tableau environment (test mode).");
         return;
       }
       tableau.extensions.initializeAsync().then(() => {
