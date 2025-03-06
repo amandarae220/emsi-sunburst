@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Sunburst Chart – EMSI Data (Generation → Occupation)</title>
+  <title>Sunburst Chart – EMSI Data (Generation → Occupation) with Wrapped Labels</title>
   <!-- Load d3.js -->
   <script src="https://d3js.org/d3.v6.min.js"></script>
   <!-- (Optional) Load the Tableau Extensions API -->
@@ -43,7 +43,7 @@
 </head>
 <body>
   <h2>Sunburst Chart: Generation (Inner Ring) → Occupation (Outer Ring)</h2>
-  <p>This visualization groups jobs by Generation and Occupation using the 2013 Jobs column. Now with labels!</p>
+  <p>This visualization groups jobs by Generation and Occupation (using 2013 Jobs) with wrapped labels.</p>
   <div class="chart-container">
     <svg id="sunburst" width="700" height="700"></svg>
     <div class="tooltip" id="tooltip"></div>
@@ -73,24 +73,22 @@
       .innerRadius(d => d.y0)
       .outerRadius(d => d.y1);
 
-    // Color scale (you can customize as needed)
+    // Color scale (customize as needed)
     const color = d3.scaleOrdinal(d3.schemeCategory10);
 
     // -------------------------------------------------------------------
     // 2) Build Hierarchy from CSV Data
     // -------------------------------------------------------------------
     function buildHierarchy(csvData) {
-      // We'll group by Generation -> Occupation, summing "2013 Jobs".
+      // Group by Generation -> Occupation, summing "2013 Jobs"
       const nestedMap = d3.rollup(
         csvData,
         v => d3.sum(v, d => d.jobs2013),
-        d => d.generation,    // first grouping: Generation
-        d => d.occupation     // second grouping: Occupation
+        d => d.generation,
+        d => d.occupation
       );
 
-      // Convert nestedMap into a hierarchical object
       const root = { name: "All Jobs", children: [] };
-
       for (const [genKey, occMap] of nestedMap.entries()) {
         const genNode = { name: genKey, children: [] };
         for (const [occKey, totalJobs] of occMap.entries()) {
@@ -105,16 +103,15 @@
     }
 
     // -------------------------------------------------------------------
-    // 3) Draw the Sunburst (with labels)
+    // 3) Draw the Sunburst (with wrapped labels)
     // -------------------------------------------------------------------
     function drawSunburst(data) {
-      // Convert data to a d3 hierarchy, sum the values, and partition it
       const root = d3.hierarchy(data)
                      .sum(d => d.value);
 
-      partition(root); // mutates root, adding x0, x1, y0, y1
+      partition(root);
 
-      // Group arcs + labels together
+      // Group arcs and labels together
       const arcsGroup = svg.selectAll("g.arc-group")
         .data(root.descendants())
         .join("g")
@@ -124,14 +121,12 @@
       arcsGroup.append("path")
         .attr("class", "arc")
         .attr("fill", d => {
-          // Depth 0=All Jobs, 1=Generation, 2=Occupation
-          if (d.depth === 1) return color(d.data.name);     // Generation
-          if (d.depth === 2) return color(d.parent.data.name); // Occupation uses parent's color
-          return "#ccc"; // Root node color
+          if (d.depth === 1) return color(d.data.name);
+          if (d.depth === 2) return color(d.parent.data.name);
+          return "#ccc";
         })
         .attr("d", arc)
         .on("mouseover", function(event, d) {
-          // Show tooltip
           tooltip.style("opacity", 1);
           const generation = (d.depth === 2) ? d.parent.data.name : d.data.name;
           const occupation = (d.depth === 2) ? d.data.name : "";
@@ -145,68 +140,90 @@
           .style("top", (event.pageY + 10) + "px");
         })
         .on("mousemove", function(event) {
-          // Move tooltip
           tooltip.style("left", (event.pageX + 10) + "px")
                  .style("top", (event.pageY + 10) + "px");
         })
         .on("mouseout", function() {
-          // Hide tooltip
           tooltip.style("opacity", 0);
         })
         .on("click", function(event, d) {
-          // (Optional) Apply a Tableau filter if integrating with the Extensions API
           if (tableauEnv.isTableau) {
             applyTableauFilter(d);
           }
         });
 
-      // --- Add labels in white text ---
+      // Add labels with wrapping
       arcsGroup.append("text")
         .attr("class", "arc-label")
         .attr("transform", d => labelTransform(d))
         .attr("dy", "0.35em")
-        .text(d => {
-          // Skip labeling the root or extremely small arcs
-          if (d.depth === 0) return "";
-          // If the arc angle is too small, skip the label to avoid clutter
+        .each(function(d) {
+          // Skip the root and very small arcs
+          if (d.depth === 0) return;
           const angle = d.x1 - d.x0;
-          if (angle < 0.01) return "";
-          return d.data.name;
+          if (angle < 0.01) return;
+          const labelText = d.data.name;
+          // Compute available width along the arc
+          const r = (d.y0 + d.y1) / 2;
+          const availableWidth = angle * r - 4; // subtract a few pixels for padding
+          const textElem = d3.select(this);
+          textElem.text(labelText);
+          wrap(textElem, availableWidth);
         });
     }
 
-    // Helper function for label positioning
+    // -------------------------------------------------------------------
+    // Helper Functions
+    // -------------------------------------------------------------------
+    // Calculate label transform for positioning along the arc
     function labelTransform(d) {
-      // Center angle in radians
       const angle = (d.x0 + d.x1) / 2;
-      // Convert to degrees and rotate so "midpoint" is at -90
       const rotate = (angle * 180 / Math.PI) - 90;
-      // Radius is halfway between inner and outer
       const r = (d.y0 + d.y1) / 2;
-      // If rotate >= 180, flip the text to avoid upside-down labels
       const flip = rotate < 180 ? 0 : 180;
       return `rotate(${rotate}) translate(${r},0) rotate(${flip})`;
+    }
+
+    // Wrap text for labels so that they don't overflow the arc.
+    // This function creates tspans for each line if needed.
+    function wrap(text, width) {
+      text.each(function() {
+        var textElem = d3.select(this),
+            words = textElem.text().split(/\s+/).reverse(),
+            word,
+            line = [],
+            lineNumber = 0,
+            lineHeight = 1.1, // ems
+            y = textElem.attr("y") || 0,
+            dy = parseFloat(textElem.attr("dy")) || 0,
+            tspan = textElem.text(null).append("tspan").attr("x", 0).attr("y", y).attr("dy", dy + "em");
+
+        while (word = words.pop()) {
+          line.push(word);
+          tspan.text(line.join(" "));
+          if (tspan.node().getComputedTextLength() > width) {
+            line.pop();
+            tspan.text(line.join(" "));
+            line = [word];
+            tspan = textElem.append("tspan").attr("x", 0).attr("y", y).attr("dy", ++lineNumber * lineHeight + dy + "em").text(word);
+          }
+        }
+      });
     }
 
     // -------------------------------------------------------------------
     // 4) Load CSV and Render
     // -------------------------------------------------------------------
     function loadDataAndRender() {
-      // Replace the URL with your own GitHub Pages CSV path if needed:
-      d3.csv("https://amandarae220.github.io/emsi-sunburst/data.csv").then(rawData => {
-        // Parse CSV columns
-        const parsed = rawData.map(d => {
-          return {
-            generation: d["Generation"] || "Unknown",
-            occupation: d["Occupation"] || "Unknown",
-            jobs2013: +String(d["2013 Jobs"]).replace(/,/g, "") // parse "2013 Jobs" as number
-          };
-        });
+      // Update this URL to match your GitHub Pages CSV location:
+      d3.csv("https://myusername.github.io/emsi-sunburst/data.csv").then(rawData => {
+        const parsed = rawData.map(d => ({
+          generation: d["Generation"] || "Unknown",
+          occupation: d["Occupation"] || "Unknown",
+          jobs2013: +String(d["2013 Jobs"]).replace(/,/g, "")
+        }));
 
-        // Build hierarchical structure
         const hierarchyData = buildHierarchy(parsed);
-
-        // Draw the sunburst
         drawSunburst(hierarchyData);
       });
     }
@@ -220,35 +237,23 @@
     };
 
     function applyTableauFilter(d) {
-      // Example logic: if user clicks a Generation-level arc, filter on "Generation".
-      // If Occupation-level arc, filter on "Occupation".
       const depth = d.depth;
-      let filterField = null;
-      let filterValue = null;
-
+      let filterField = null, filterValue = null;
       if (depth === 1) {
         filterField = "Generation";
         filterValue = d.data.name;
       } else if (depth === 2) {
         filterField = "Occupation";
         filterValue = d.data.name;
-      } else {
-        return; // skip root
-      }
-
+      } else return;
       if (tableauEnv.worksheet) {
-        tableauEnv.worksheet.applyFilterAsync(
-          filterField,
-          filterValue,
-          tableau.FilterUpdateType.Replace
-        ).then(() => {
-          console.log(`Applied filter: ${filterField} = ${filterValue}`);
-        }).catch(err => console.error("Error applying filter:", err));
+        tableauEnv.worksheet.applyFilterAsync(filterField, filterValue, tableau.FilterUpdateType.Replace)
+          .then(() => console.log(`Applied filter: ${filterField} = ${filterValue}`))
+          .catch(err => console.error("Error applying filter:", err));
       }
     }
 
     function updateFromTableau(event) {
-      // Re-load data or parse the event for more specific filtering
       console.log("Received Tableau filter event:", event);
       loadDataAndRender();
     }
@@ -261,10 +266,7 @@
       tableau.extensions.initializeAsync().then(() => {
         tableauEnv.isTableau = true;
         const dashboard = tableau.extensions.dashboardContent.dashboard;
-        // Example: Use the first worksheet
         tableauEnv.worksheet = dashboard.worksheets[0];
-
-        // Listen for filter changes
         dashboard.worksheets.forEach(ws => {
           ws.addEventListener(tableau.TableauEventType.FilterChanged, updateFromTableau);
         });
