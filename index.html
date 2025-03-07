@@ -2,25 +2,24 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Sunburst Chart – EMSI Data (Generation → Occupation) with Centered Wrapped Labels</title>
-  <!-- Load d3.js -->
+  <title>Sunburst Chart – Centered, Correctly Rotated Labels</title>
+  <!-- Load d3.js v6 -->
   <script src="https://d3js.org/d3.v6.min.js"></script>
-  <!-- (Optional) Load the Tableau Extensions API -->
-  <script src="https://tableau.github.io/extensions-api/tableau.extensions.1.latest.js"></script>
   <style>
     body {
       font-family: sans-serif;
       margin: 20px;
     }
-    .chart-container {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-    }
     .arc {
       cursor: pointer;
       stroke: #fff;
       stroke-width: 1px;
+    }
+    .arc-label {
+      fill: white;
+      font-size: 12px;
+      text-anchor: middle;
+      pointer-events: none;
     }
     .tooltip {
       position: absolute;
@@ -32,165 +31,49 @@
       pointer-events: none;
       opacity: 0;
     }
-    /* White text for labels */
-    .arc-label {
-      fill: white;
-      font-size: 12px;
-      text-anchor: middle;
-      pointer-events: none;
-    }
   </style>
 </head>
 <body>
-  <h2>Sunburst Chart: Generation (Inner Ring) → Occupation (Outer Ring)</h2>
-  <p>This visualization groups jobs by Generation and Occupation (using 2013 Jobs) with centered, wrapped labels that display only if enough space is available.</p>
-  <div class="chart-container">
-    <svg id="sunburst" width="700" height="700"></svg>
-    <div class="tooltip" id="tooltip"></div>
-  </div>
-
+  <svg id="sunburst" width="700" height="700"></svg>
+  <div class="tooltip" id="tooltip"></div>
   <script>
-    // -------------------------------------------------------------------
-    // 1) Sunburst Layout Setup
-    // -------------------------------------------------------------------
+    // Set up dimensions
     const width = 700,
           height = 700,
           radius = Math.min(width, height) / 2;
-
+          
+    // Select SVG and tooltip
     const svg = d3.select("#sunburst")
-                  .attr("viewBox", [-width / 2, -height / 2, width, height]);
-
+                  .attr("viewBox", [-width/2, -height/2, width, height]);
     const tooltip = d3.select("#tooltip");
 
     // Create a partition layout
     const partition = d3.partition()
-      .size([2 * Math.PI, radius]);
+                        .size([2 * Math.PI, radius]);
 
     // Create an arc generator
     const arc = d3.arc()
-      .startAngle(d => d.x0)
-      .endAngle(d => d.x1)
-      .innerRadius(d => d.y0)
-      .outerRadius(d => d.y1);
+                  .startAngle(d => d.x0)
+                  .endAngle(d => d.x1)
+                  .innerRadius(d => d.y0)
+                  .outerRadius(d => d.y1);
 
-    // Color scale (customize as needed)
+    // Color scale
     const color = d3.scaleOrdinal(d3.schemeCategory10);
 
-    // Define a minimum available width (in pixels) required for a label.
+    // Define minimum available width for label (in pixels)
     const minLabelWidth = 12;
 
-    // -------------------------------------------------------------------
-    // 2) Build Hierarchy from CSV Data
-    // -------------------------------------------------------------------
-    function buildHierarchy(csvData) {
-      // Group by Generation -> Occupation, summing "2013 Jobs"
-      const nestedMap = d3.rollup(
-        csvData,
-        v => d3.sum(v, d => d.jobs2013),
-        d => d.generation,
-        d => d.occupation
-      );
-
-      const root = { name: "All Jobs", children: [] };
-      for (const [genKey, occMap] of nestedMap.entries()) {
-        const genNode = { name: genKey, children: [] };
-        for (const [occKey, totalJobs] of occMap.entries()) {
-          genNode.children.push({
-            name: occKey,
-            value: totalJobs
-          });
-        }
-        root.children.push(genNode);
-      }
-      return root;
+    // Revised computeTextRotation: Computes the mid-angle and then adjusts for readability.
+    function computeTextRotation(d) {
+      // Compute the midpoint angle in radians.
+      let midAngle = (d.x0 + d.x1) / 2;
+      let degrees = midAngle * 180 / Math.PI;
+      // Flip text if the angle is between 90 and 270 degrees.
+      return (degrees < 90 || degrees > 270) ? degrees : degrees + 180;
     }
 
-    // -------------------------------------------------------------------
-    // 3) Draw the Sunburst (with centered, wrapped labels)
-    // -------------------------------------------------------------------
-    function drawSunburst(data) {
-      const root = d3.hierarchy(data)
-                     .sum(d => d.value);
-
-      partition(root);
-
-      // Group arcs and labels together
-      const arcsGroup = svg.selectAll("g.arc-group")
-        .data(root.descendants())
-        .join("g")
-        .attr("class", "arc-group");
-
-      // Draw arcs
-      arcsGroup.append("path")
-        .attr("class", "arc")
-        .attr("fill", d => {
-          if (d.depth === 1) return color(d.data.name);
-          if (d.depth === 2) return color(d.parent.data.name);
-          return "#ccc";
-        })
-        .attr("d", arc)
-        .on("mouseover", function(event, d) {
-          tooltip.style("opacity", 1);
-          const generation = (d.depth === 2) ? d.parent.data.name : d.data.name;
-          const occupation = (d.depth === 2) ? d.data.name : "";
-          const jobs = d.value ? d.value.toLocaleString() : "";
-          tooltip.html(`
-            <strong>${generation}</strong><br/>
-            ${occupation ? occupation + "<br/>" : ""}
-            Jobs: ${jobs}
-          `)
-          .style("left", (event.pageX + 10) + "px")
-          .style("top", (event.pageY + 10) + "px");
-        })
-        .on("mousemove", function(event) {
-          tooltip.style("left", (event.pageX + 10) + "px")
-                 .style("top", (event.pageY + 10) + "px");
-        })
-        .on("mouseout", function() {
-          tooltip.style("opacity", 0);
-        })
-        .on("click", function(event, d) {
-          if (tableauEnv.isTableau) {
-            applyTableauFilter(d);
-          }
-        });
-
-      // Add labels with wrapping if there is enough available space.
-      arcsGroup.append("text")
-        .attr("class", "arc-label")
-        .attr("dy", "0.35em")
-        .attr("transform", d => labelTransform(d))
-        .each(function(d) {
-          // Skip the root and very small arcs
-          if (d.depth === 0) return;
-          // Compute available arc length at mid-radius using the original layout values.
-          const midRadius = (d.y0 + d.y1) / 2;
-          const availableWidth = (d.x1 - d.x0) * midRadius;
-          if (availableWidth < minLabelWidth) {
-            d3.select(this).remove();
-            return;
-          }
-          const labelText = d.data.name;
-          const textElem = d3.select(this).text(labelText);
-          wrap(textElem, availableWidth);
-        });
-    }
-
-    // -------------------------------------------------------------------
-    // 4) Helper Functions for Label Positioning and Wrapping
-    // -------------------------------------------------------------------
-    // New label transform function using arc.centroid for better centering.
-    function labelTransform(d) {
-      // Compute the centroid of the arc.
-      var centroid = arc.centroid(d);
-      // Compute the angle of the centroid in degrees.
-      var angle = Math.atan2(centroid[1], centroid[0]) * 180 / Math.PI;
-      // Adjust the angle so the text is not upside down.
-      if (angle > 90 || angle < -90) { angle += 180; }
-      return "translate(" + centroid[0] + "," + centroid[1] + ") rotate(" + angle + ")";
-    }
-
-    // Wrap text for labels so that they don't overflow the arc.
+    // Standard text wrapping function using <tspan>
     function wrap(text, width) {
       text.each(function() {
         var textElem = d3.select(this),
@@ -198,11 +81,10 @@
             word,
             line = [],
             lineNumber = 0,
-            lineHeight = 1.1, // ems
+            lineHeight = 1.1, // in ems
             y = textElem.attr("y") || 0,
             dy = parseFloat(textElem.attr("dy")) || 0,
             tspan = textElem.text(null).append("tspan").attr("x", 0).attr("y", y).attr("dy", dy + "em");
-
         while (word = words.pop()) {
           line.push(word);
           tspan.text(line.join(" "));
@@ -216,11 +98,87 @@
       });
     }
 
-    // -------------------------------------------------------------------
-    // 5) Load CSV and Render the Chart
-    // -------------------------------------------------------------------
+    // Build hierarchical data from CSV rows
+    function buildHierarchy(csvData) {
+      // Group data by generation then by occupation, summing 2013 Jobs
+      const nestedMap = d3.rollup(
+        csvData,
+        v => d3.sum(v, d => d.jobs2013),
+        d => d.generation,
+        d => d.occupation
+      );
+      const root = { name: "All Jobs", children: [] };
+      for (const [gen, occMap] of nestedMap.entries()) {
+        const genNode = { name: gen, children: [] };
+        for (const [occ, total] of occMap.entries()) {
+          genNode.children.push({ name: occ, value: total });
+        }
+        root.children.push(genNode);
+      }
+      return root;
+    }
+
+    // Draw the sunburst chart with centered labels.
+    function drawSunburst(data) {
+      const root = d3.hierarchy(data)
+                     .sum(d => d.value);
+      partition(root);
+      // Group for each node (arc and label)
+      const groups = svg.selectAll("g.arc-group")
+                        .data(root.descendants())
+                        .join("g")
+                        .attr("class", "arc-group");
+      // Draw arcs
+      groups.append("path")
+            .attr("class", "arc")
+            .attr("d", arc)
+            .attr("fill", d => {
+              if (d.depth === 1) return color(d.data.name);
+              if (d.depth === 2) return color(d.parent.data.name);
+              return "#ccc";
+            })
+            .on("mouseover", (event, d) => {
+              tooltip.style("opacity", 1)
+                     .html(`<strong>${d.data.name}</strong><br/>Jobs: ${d.value ? d.value.toLocaleString() : ''}`)
+                     .style("left", (event.pageX + 10) + "px")
+                     .style("top", (event.pageY + 10) + "px");
+            })
+            .on("mousemove", (event) => {
+              tooltip.style("left", (event.pageX + 10) + "px")
+                     .style("top", (event.pageY + 10) + "px");
+            })
+            .on("mouseout", () => {
+              tooltip.style("opacity", 0);
+            });
+
+      // Add labels: Position using arc.centroid and rotate using computeTextRotation.
+      groups.append("text")
+            .attr("class", "arc-label")
+            .attr("dy", "0.35em")
+            .attr("transform", d => {
+              // Calculate centroid for placement.
+              const c = arc.centroid(d);
+              // Calculate the rotation angle for the label.
+              const rotation = computeTextRotation(d);
+              return `translate(${c[0]},${c[1]})rotate(${rotation})`;
+            })
+            .each(function(d) {
+              if(d.depth === 0) return;  // Skip root
+              // Compute available arc length at the midpoint radius.
+              const midRadius = (d.y0 + d.y1) / 2;
+              const availableWidth = (d.x1 - d.x0) * midRadius;
+              if(availableWidth < minLabelWidth) {
+                d3.select(this).remove();
+                return;
+              }
+              // Set the label text and wrap if necessary.
+              d3.select(this).text(d.data.name);
+              wrap(d3.select(this), availableWidth);
+            });
+    }
+
+    // Load CSV data and render the chart.
     function loadDataAndRender() {
-      // Use a relative URL if the CSV is in the same repository.
       d3.csv("data.csv").then(rawData => {
         const parsed = rawData.map(d => ({
           generation: d["Generation"] || "Unknown",
@@ -232,56 +190,7 @@
       });
     }
 
-    // -------------------------------------------------------------------
-    // 6) (Optional) Tableau Extensions – Two‐Way Filtering
-    // -------------------------------------------------------------------
-    const tableauEnv = {
-      isTableau: false,
-      worksheet: null
-    };
-
-    function applyTableauFilter(d) {
-      const depth = d.depth;
-      let filterField = null, filterValue = null;
-      if (depth === 1) {
-        filterField = "Generation";
-        filterValue = d.data.name;
-      } else if (depth === 2) {
-        filterField = "Occupation";
-        filterValue = d.data.name;
-      } else return;
-      if (tableauEnv.worksheet) {
-        tableauEnv.worksheet.applyFilterAsync(filterField, filterValue, tableau.FilterUpdateType.Replace)
-          .then(() => console.log(`Applied filter: ${filterField} = ${filterValue}`))
-          .catch(err => console.error("Error applying filter:", err));
-      }
-    }
-
-    function updateFromTableau(event) {
-      console.log("Received Tableau filter event:", event);
-      loadDataAndRender();
-    }
-
-    function setupTableauExtension() {
-      if (typeof tableau === "undefined") {
-        console.log("Not in a Tableau environment (test mode).");
-        return;
-      }
-      tableau.extensions.initializeAsync().then(() => {
-        tableauEnv.isTableau = true;
-        const dashboard = tableau.extensions.dashboardContent.dashboard;
-        tableauEnv.worksheet = dashboard.worksheets[0];
-        dashboard.worksheets.forEach(ws => {
-          ws.addEventListener(tableau.TableauEventType.FilterChanged, updateFromTableau);
-        });
-      });
-    }
-
-    // -------------------------------------------------------------------
-    // 7) Initialize
-    // -------------------------------------------------------------------
     loadDataAndRender();
-    setupTableauExtension();
   </script>
 </body>
 </html>
