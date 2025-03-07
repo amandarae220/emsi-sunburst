@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Sunburst Chart – Centered, Correctly Rotated Labels</title>
+  <title>Sunburst Chart – Radial (Perpendicular) Labels</title>
   <!-- Load d3.js v6 -->
   <script src="https://d3js.org/d3.v6.min.js"></script>
   <style>
@@ -37,21 +37,21 @@
   <svg id="sunburst" width="700" height="700"></svg>
   <div class="tooltip" id="tooltip"></div>
   <script>
-    // Set up dimensions
+    // Dimensions and radius
     const width = 700,
           height = 700,
           radius = Math.min(width, height) / 2;
           
-    // Select SVG and tooltip
+    // Select SVG and tooltip container
     const svg = d3.select("#sunburst")
                   .attr("viewBox", [-width/2, -height/2, width, height]);
     const tooltip = d3.select("#tooltip");
 
-    // Create a partition layout
+    // Partition layout
     const partition = d3.partition()
                         .size([2 * Math.PI, radius]);
 
-    // Create an arc generator
+    // Arc generator
     const arc = d3.arc()
                   .startAngle(d => d.x0)
                   .endAngle(d => d.x1)
@@ -61,16 +61,17 @@
     // Color scale
     const color = d3.scaleOrdinal(d3.schemeCategory10);
 
-    // Define minimum available width for label (in pixels)
+    // Define minimum width for displaying a label (in pixels)
     const minLabelWidth = 12;
 
-    // Revised computeTextRotation: Computes the mid-angle and then adjusts for readability.
+    // Revised computeTextRotation: Use the mid-angle in degrees (without subtracting 90)
+    // and flip by 180 if the angle is between 90 and 270 so that text appears upright.
     function computeTextRotation(d) {
-      // Compute the midpoint angle in radians.
-      let midAngle = (d.x0 + d.x1) / 2;
-      let degrees = midAngle * 180 / Math.PI;
-      // Flip text if the angle is between 90 and 270 degrees.
-      return (degrees < 90 || degrees > 270) ? degrees : degrees + 180;
+      let angle = (d.x0 + d.x1) / 2 * 180 / Math.PI;
+      if (angle > 90 && angle < 270) {
+        angle += 180;
+      }
+      return angle;
     }
 
     // Standard text wrapping function using <tspan>
@@ -84,7 +85,11 @@
             lineHeight = 1.1, // in ems
             y = textElem.attr("y") || 0,
             dy = parseFloat(textElem.attr("dy")) || 0,
-            tspan = textElem.text(null).append("tspan").attr("x", 0).attr("y", y).attr("dy", dy + "em");
+            tspan = textElem.text(null)
+                             .append("tspan")
+                             .attr("x", 0)
+                             .attr("y", y)
+                             .attr("dy", dy + "em");
         while (word = words.pop()) {
           line.push(word);
           tspan.text(line.join(" "));
@@ -92,15 +97,19 @@
             line.pop();
             tspan.text(line.join(" "));
             line = [word];
-            tspan = textElem.append("tspan").attr("x", 0).attr("y", y).attr("dy", ++lineNumber * lineHeight + dy + "em").text(word);
+            tspan = textElem.append("tspan")
+                            .attr("x", 0)
+                            .attr("y", y)
+                            .attr("dy", ++lineNumber * lineHeight + dy + "em")
+                            .text(word);
           }
         }
       });
     }
 
-    // Build hierarchical data from CSV rows
+    // Build hierarchical data from CSV rows.
+    // Assumes CSV has columns "Generation", "Occupation", "2013 Jobs"
     function buildHierarchy(csvData) {
-      // Group data by generation then by occupation, summing 2013 Jobs
       const nestedMap = d3.rollup(
         csvData,
         v => d3.sum(v, d => d.jobs2013),
@@ -118,17 +127,18 @@
       return root;
     }
 
-    // Draw the sunburst chart with centered labels.
+    // Draw the sunburst chart with labels.
     function drawSunburst(data) {
       const root = d3.hierarchy(data)
                      .sum(d => d.value);
       partition(root);
-      // Group for each node (arc and label)
+
       const groups = svg.selectAll("g.arc-group")
                         .data(root.descendants())
                         .join("g")
                         .attr("class", "arc-group");
-      // Draw arcs
+
+      // Draw the arcs.
       groups.append("path")
             .attr("class", "arc")
             .attr("d", arc)
@@ -151,27 +161,26 @@
               tooltip.style("opacity", 0);
             });
 
-      // Add labels: Position using arc.centroid and rotate using computeTextRotation.
+      // Add labels.
       groups.append("text")
             .attr("class", "arc-label")
             .attr("dy", "0.35em")
             .attr("transform", d => {
-              // Calculate centroid for placement.
+              // Place the text at the arc's centroid.
               const c = arc.centroid(d);
-              // Calculate the rotation angle for the label.
+              // Use our new computeTextRotation function.
               const rotation = computeTextRotation(d);
-              return `translate(${c[0]},${c[1]})rotate(${rotation})`;
+              return `translate(${c[0]},${c[1]}) rotate(${rotation})`;
             })
             .each(function(d) {
-              if(d.depth === 0) return;  // Skip root
-              // Compute available arc length at the midpoint radius.
+              if (d.depth === 0) return; // skip the root
+              // Compute available width along the arc at mid-radius.
               const midRadius = (d.y0 + d.y1) / 2;
               const availableWidth = (d.x1 - d.x0) * midRadius;
-              if(availableWidth < minLabelWidth) {
+              if (availableWidth < minLabelWidth) {
                 d3.select(this).remove();
                 return;
               }
-              // Set the label text and wrap if necessary.
               d3.select(this).text(d.data.name);
               wrap(d3.select(this), availableWidth);
             });
