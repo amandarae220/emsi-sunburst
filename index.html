@@ -67,9 +67,9 @@
     // Revised computeTextRotation: Use the mid-angle in degrees (without subtracting 90)
     // and flip by 180 if the angle is between 90 and 270 so that text appears upright.
     function computeTextRotation(d) {
-      let angle = (d.x0 + d.x1) / 2 * 180 / Math.PI;
+      let angle = (d.x0 + d.x1) / 2 * 90 / Math.PI;
       if (angle > 90 && angle < 270) {
-        angle += 180;
+        angle += 90;
       }
       return angle;
     }
