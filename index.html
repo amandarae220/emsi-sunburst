@@ -2,10 +2,10 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Sunburst Chart – Generation Filter Only with Tableau Integration</title>
+  <title>Sunburst Chart – Tableau Interactive Filter</title>
   <!-- Load d3.js v6 -->
   <script src="https://d3js.org/d3.v6.min.js"></script>
-  <!-- Optionally load the Tableau Extensions API -->
+  <!-- Load Tableau Extensions API -->
   <script src="https://tableau.github.io/extensions-api/tableau.extensions.1.latest.js"></script>
   <style>
     body {
@@ -23,74 +23,65 @@
       text-anchor: middle;
       pointer-events: none;
     }
-    .tooltip {
-      position: absolute;
-      text-align: center;
-      padding: 6px;
-      font: 12px sans-serif;
-      background: lightsteelblue;
-      border-radius: 4px;
-      pointer-events: none;
-      opacity: 0;
-    }
-    .parent text {
-      fill: white;
-      font-size: 12px;
-      text-anchor: middle;
-      pointer-events: none;
-    }
   </style>
 </head>
 <body>
   <svg id="sunburst" width="928" height="928"></svg>
-  <div class="tooltip" id="tooltip"></div>
-  <script>
-    // Global configuration
-    const width = 928;
-    const height = width;
-    const radius = width / 6;
 
-    // Select SVG container and tooltip
+  <script>
+    const width = 928, height = width, radius = width / 6;
     const svg = d3.select("#sunburst")
       .attr("viewBox", [-width/2, -height/2, width, width])
       .style("font", "10px sans-serif");
-    const tooltip = d3.select("#tooltip");
-
-    // Create color scale
+    
     const color = d3.scaleOrdinal(d3.quantize(d3.interpolateRainbow, 11));
-
-    // Global variable for the target Tableau worksheet.
     let tableauWorksheet = null;
 
-    // Initialize Tableau Extensions API if available.
+    // Initialize Tableau Extensions API and listen for filter changes
     if (typeof tableau !== "undefined") {
       tableau.extensions.initializeAsync().then(() => {
         const dashboard = tableau.extensions.dashboardContent.dashboard;
-        // Change "Sheet1" to the desired worksheet name.
-        tableauWorksheet = dashboard.worksheets.find(ws => ws.name === "Sheet1");
-        // Listen for filter changes (optional)
-        tableauWorksheet.addEventListener(tableau.TableauEventType.FilterChanged, onFilterChanged);
+        tableauWorksheet = dashboard.worksheets.find(ws => ws.name === "Sheet1"); // Change to your worksheet name
+        
+        // Listen for Tableau filter changes
+        tableauWorksheet.addEventListener(tableau.TableauEventType.FilterChanged, event => {
+          console.log("Tableau filter changed:", event);
+          applyTableauFilter(event);
+        });
       }).catch(error => console.error("Tableau API error:", error));
     } else {
       console.warn("Tableau Extensions API is not available. Running in test mode.");
     }
 
-    // Handler for Tableau filter changes.
-    function onFilterChanged(event) {
-      console.log("Tableau filter changed:", event);
-      // Here you could update your D3 visual based on the new filter.
+    // Function to filter the Sunburst chart based on Tableau filters
+    function applyTableauFilter(event) {
+      const appliedFilters = event.filters;
+      const generationFilter = appliedFilters.find(f => f.fieldName === "Generation");
+
+      if (generationFilter && generationFilter.appliedValues.length > 0) {
+        const selectedGenerations = generationFilter.appliedValues.map(d => d.value);
+        console.log("Filtering Sunburst to:", selectedGenerations);
+        loadDataAndRender(selectedGenerations);
+      }
     }
 
-    // Load CSV data from GitHub.
-    d3.csv("https://amandarae220.github.io/emsi-sunburst/data.csv").then(rawData => {
-      const parsed = rawData.map(d => ({
-        generation: d["Generation"] || "Unknown",
-        occupation: d["Occupation"] || "Unknown",
-        value: +String(d["2013 Jobs"]).replace(/,/g, "")
-      }));
-      const data = buildHierarchy(parsed);
-      drawSunburst(data);
-    }).catch(error => console.error(error));
+    // Load CSV data and apply filters if provided
+    function loadDataAndRender(selectedGenerations = null) {
+      d3.csv("https://amandarae220.github.io/emsi-sunburst/data.csv").then(rawData => {
+        let parsed = rawData.map(d => ({
+          generation: d["Generation"] || "Unknown",
+          occupation: d["Occupation"] || "Unknown",
+          value: +String(d["2013 Jobs"]).replace(/,/g, "")
+        }));
+
+        if (selectedGenerations) {
+          parsed = parsed.filter(d => selectedGenerations.includes(d.generation));
+        }
+
+        const hierarchyData = buildHierarchy(parsed);
+        drawSunburst(hierarchyData);
+      }).catch(error => console.error("Error loading data:", error));
+    }
 
     // Build hierarchical data (group by Generation, then Occupation)
     function buildHierarchy(csvData) {
@@ -103,6 +94,7 @@
         const occMap = map.get(gen);
         occMap.set(occ, (occMap.get(occ) || 0) + value);
       });
+
       const root = { name: "All Jobs", children: [] };
       map.forEach((occMap, gen) => {
         const genNode = { name: gen, children: [] };
@@ -111,15 +103,11 @@
         });
         root.children.push(genNode);
       });
+
       return root;
     }
 
-    // Truncate label to a maximum of 14 characters (if longer, first 11 characters plus "...")
-    function truncateLabel(text) {
-      return text.length > 14 ? text.substring(0, 11) + "..." : text;
-    }
-
-    // Draw the sunburst chart with smooth zoom transitions.
+    // Draw Sunburst Chart
     function drawSunburst(dataHierarchy) {
       svg.selectAll("*").remove();
       const hierarchy = d3.hierarchy(dataHierarchy)
@@ -129,7 +117,6 @@
           .size([2 * Math.PI, hierarchy.height + 1])(hierarchy);
       root.each(d => d.current = d);
 
-      // Create arc generator (scale radial positions by radius)
       const arcGen = d3.arc()
           .startAngle(d => d.x0)
           .endAngle(d => d.x1)
@@ -138,142 +125,53 @@
           .innerRadius(d => d.y0 * radius)
           .outerRadius(d => Math.max(d.y0 * radius, d.y1 * radius - 1));
 
-      // Append arcs.
-      const groups = svg.append("g")
+      const path = svg.append("g")
         .selectAll("g")
         .data(root.descendants().slice(1))
         .join("g")
-        .attr("class", "arc-group");
-
-      const path = groups.append("path")
-          .attr("class", "arc")
-          .attr("d", d => arcGen(d.current))
-          .attr("fill", d => {
-            let cur = d;
-            while (cur.depth > 1) cur = cur.parent;
-            return color(cur.data.name);
-          })
-          .attr("fill-opacity", d => arcVisible(d.current) ? (d.children ? 0.6 : 0.4) : 0)
-          .attr("pointer-events", d => arcVisible(d.current) ? "auto" : "none")
-          .on("click", function(event, d) {
-            // Only allow clicks on Generation nodes (depth === 1).
-            if (d.depth === 1) {
-              // Apply filter to Tableau visual.
-              if (tableauWorksheet) {
-                tableauWorksheet.applyFilterAsync("Generation", d.data.name, tableau.FilterUpdateType.Replace)
-                  .catch(error => console.error("Error applying Tableau filter:", error));
-              }
-              clicked(event, d);
-            }
-          });
+        .attr("class", "arc-group")
+        .append("path")
+        .attr("class", "arc")
+        .attr("d", d => arcGen(d.current))
+        .attr("fill", d => {
+          let cur = d;
+          while (cur.depth > 1) cur = cur.parent;
+          return color(cur.data.name);
+        })
+        .attr("pointer-events", "auto")
+        .on("click", function(event, d) {
+          if (d.depth === 1 && tableauWorksheet) {
+            tableauWorksheet.applyFilterAsync(
+              "Generation",
+              d.data.name,
+              tableau.FilterUpdateType.Replace
+            ).catch(error => console.error("Error applying Tableau filter:", error));
+          }
+        });
 
       path.append("title")
           .text(d => `${d.ancestors().map(d => d.data.name).reverse().join("/")}\n${d.value}`);
 
-      // Append labels.
-      const label = svg.append("g")
-          .attr("pointer-events", "none")
-          .attr("text-anchor", "middle")
-          .style("user-select", "none")
+      svg.append("g")
         .selectAll("text")
         .data(root.descendants().slice(1))
         .join("text")
-          .attr("class", "arc-label")
-          .attr("dy", "0.35em")
-          .attr("fill-opacity", d => +labelVisible(d.current))
-          .attr("transform", d => labelTransform(d.current))
-          .text(d => truncateLabel(d.data.name));
-
-      // Append parent group (circle + label) for zoom-out.
-      const parent = svg.append("g")
-          .attr("class", "parent")
-          .on("click", clicked);
-
-      parent.append("circle")
-          .attr("r", radius)
-          .attr("fill", "none")
-          .attr("pointer-events", "all");
-
-      parent.append("text")
-          .attr("class", "parent-label")
-          .attr("dy", "0.35em")
-          .attr("text-anchor", "middle")
-          .text(""); // Will update upon zoom
-
-      // Click handler for zoom transitions.
-      function clicked(event, p) {
-        // Only allow clicks on Generation nodes or the parent circle.
-        if (p.depth > 1) return;
-
-        // Update parent's appearance if a Generation node is clicked.
-        if (p.depth === 1) {
-          parent.select("circle")
-            .attr("fill", color(p.data.name))
-            .attr("fill-opacity", arcVisible(p.current) ? (p.children ? 0.6 : 0.4) : 0);
-          parent.select("text").text(truncateLabel(p.data.name));
-        } else {
-          parent.select("circle").attr("fill", "none").attr("fill-opacity", 1);
-          parent.select("text").text("");
-        }
-
-        parent.datum(p.parent || root);
-
-        // Compute new target positions.
-        root.each(d => d.target = {
-          x0: Math.max(0, Math.min(1, (d.x0 - p.x0) / (p.x1 - p.x0))) * 2 * Math.PI,
-          x1: Math.max(0, Math.min(1, (d.x1 - p.x0) / (p.x1 - p.x0))) * 2 * Math.PI,
-          y0: Math.max(0, d.y0 - p.depth),
-          y1: Math.max(0, d.y1 - p.depth)
-        });
-        const t = svg.transition().duration(event.altKey ? 7500 : 750);
-
-        // Transition arcs.
-        path.transition(t)
-            .tween("data", d => {
-              const i = d3.interpolate(d.current, d.target);
-              return t => d.current = i(t);
-            })
-          .filter(function(d) {
-            return +this.getAttribute("fill-opacity") || arcVisible(d.target);
-          })
-            .attr("fill-opacity", d => arcVisible(d.target) ? (d.children ? 0.6 : 0.4) : 0)
-            .attr("pointer-events", d => arcVisible(d.target) ? "auto" : "none")
-            .attrTween("d", d => () => arcGen(d.current));
-
-        // Transition labels.
-        label.filter(function(d) {
-            return +this.getAttribute("fill-opacity") || labelVisible(d.target);
-          }).transition(t)
-            .attr("fill-opacity", d => +labelVisible(d.target))
-            .attrTween("transform", d => () => labelTransform(d.current));
-      }
-
-      function arcVisible(d) {
-        return d.y1 <= 3 && d.y0 >= 1 && d.x1 > d.x0;
-      }
-      function labelVisible(d) {
-        return d.y1 <= 3 && d.y0 >= 1 && (d.y1 - d.y0) * (d.x1 - d.x0) > 0.03;
-      }
-      function labelTransform(d) {
-        const x = (d.x0 + d.x1) / 2 * 180 / Math.PI;
-        const y = (d.y0 + d.y1) / 2 * radius;
-        return `rotate(${x - 90}) translate(${y},0) rotate(${x < 180 ? 0 : 180})`;
-      }
+        .attr("class", "arc-label")
+        .attr("dy", "0.35em")
+        .attr("fill-opacity", 1)
+        .attr("text-anchor", "middle")
+        .attr("transform", d => labelTransform(d.current))
+        .text(d => d.data.name);
     }
 
-    // Start rendering.
+    function labelTransform(d) {
+      const x = (d.x0 + d.x1) / 2 * 180 / Math.PI;
+      const y = (d.y0 + d.y1) / 2 * radius;
+      return `rotate(${x - 90}) translate(${y},0) rotate(${x < 180 ? 0 : 180})`;
+    }
+
+    // Start rendering
     loadDataAndRender();
-    function loadDataAndRender() {
-      d3.csv("data.csv").then(rawData => {
-        const parsed = rawData.map(d => ({
-          generation: d["Generation"] || "Unknown",
-          occupation: d["Occupation"] || "Unknown",
-          value: +String(d["2013 Jobs"]).replace(/,/g, "")
-        }));
-        const hierarchyData = buildHierarchy(parsed);
-        drawSunburst(hierarchyData);
-      });
-    }
   </script>
 </body>
 </html>
