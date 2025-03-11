@@ -3,7 +3,7 @@ document.addEventListener("DOMContentLoaded", function () {
 
   const width = 928, height = width, radius = width / 6;
   const svg = d3.select("#sunburst")
-    .attr("viewBox", [-width/2, -height/2, width, width])
+    .attr("viewBox", [-width / 2, -height / 2, width, width])
     .style("font", "10px sans-serif");
 
   const color = d3.scaleOrdinal(d3.quantize(d3.interpolateRainbow, 11));
@@ -15,11 +15,11 @@ document.addEventListener("DOMContentLoaded", function () {
     console.log("✅ Running inside Tableau.");
     tableau.extensions.initializeAsync().then(() => {
       const dashboard = tableau.extensions.dashboardContent.dashboard;
-      tableauWorksheet = dashboard.worksheets.find(ws => ws.name === "Sheet1"); // Change to your sheet name
+      tableauWorksheet = dashboard.worksheets.find(ws => ws.name === "Sheet1"); // Update with your sheet name
 
       // ✅ Fetch data from Tableau and render the chart
       getDataFromTableau();
-      
+
       // ✅ Listen for Tableau filter changes
       tableauWorksheet.addEventListener(tableau.TableauEventType.FilterChanged, event => {
         console.log("🎯 Tableau filter detected:", event);
@@ -39,7 +39,7 @@ document.addEventListener("DOMContentLoaded", function () {
         occupation: row[2].formattedValue, // "Occupation" column
         value: parseInt(row[4].formattedValue.replace(/,/g, "")) || 0 // Numeric value
       }));
-      
+
       console.log("📊 Data from Tableau:", parsed);
       drawSunburst(buildHierarchy(parsed));
     });
@@ -53,7 +53,7 @@ document.addEventListener("DOMContentLoaded", function () {
         occupation: d["Occupation"],
         value: +d["2013 Jobs"].replace(/,/g, "")
       }));
-      
+
       console.log("📊 Data from CSV:", parsed);
       drawSunburst(buildHierarchy(parsed));
     }).catch(error => console.error("❌ Error loading CSV:", error));
@@ -68,14 +68,19 @@ document.addEventListener("DOMContentLoaded", function () {
       occMap.set(d.occupation, (occMap.get(d.occupation) || 0) + d.value);
     });
 
-    return { name: "All Jobs", children: [...map.entries()].map(([gen, occMap]) => ({
-      name: gen, children: [...occMap.entries()].map(([occ, val]) => ({ name: occ, value: val }))
-    })) };
+    return {
+      name: "All Jobs",
+      children: [...map.entries()].map(([gen, occMap]) => ({
+        name: gen,
+        children: [...occMap.entries()].map(([occ, val]) => ({ name: occ, value: val }))
+      }))
+    };
   }
 
-  // ✅ Draw Sunburst Chart
+  // ✅ Draw Sunburst Chart with Labels & Filtering
   function drawSunburst(dataHierarchy) {
     svg.selectAll("*").remove();
+
     const root = d3.partition().size([2 * Math.PI, 2])
       (d3.hierarchy(dataHierarchy).sum(d => d.value));
 
@@ -91,10 +96,25 @@ document.addEventListener("DOMContentLoaded", function () {
       .attr("d", arc)
       .attr("fill", d => color(d.ancestors().map(d => d.data.name).reverse().join("/")))
       .on("click", (event, d) => {
-        if (d.depth === 1) applyFilterToTableau(d.data.name);
+        if (d.depth === 1) { // 🎯 Only allow filtering on "Generation" (Innermost Ring)
+          console.log(`🔍 Filtering Tableau by Generation: ${d.data.name}`);
+          applyFilterToTableau(d.data.name);
+        }
       });
 
     path.append("title").text(d => `${d.data.name}\n${d.value}`);
+
+    // ✅ Add Labels to Sunburst
+    svg.append("g")
+      .selectAll("text")
+      .data(root.descendants().slice(1))
+      .join("text")
+      .attr("transform", d => labelTransform(d))
+      .attr("text-anchor", "middle")
+      .attr("fill", "#fff")
+      .attr("font-size", "12px")
+      .attr("opacity", d => d.depth === 1 ? 1 : 0) // 🎯 Show labels only for the innermost ring (Generation)
+      .text(d => d.data.name);
   }
 
   // ✅ Apply Filter to Tableau When Clicking Sunburst
@@ -103,5 +123,12 @@ document.addEventListener("DOMContentLoaded", function () {
       tableauWorksheet.applyFilterAsync("Generation", generation, tableau.FilterUpdateType.Replace)
         .catch(error => console.error("❌ Error applying Tableau filter:", error));
     }
+  }
+
+  // ✅ Label Positioning for Readability
+  function labelTransform(d) {
+    const x = (d.x0 + d.x1) / 2 * 180 / Math.PI;
+    const y = (d.y0 + d.y1) / 2 * radius;
+    return `rotate(${x - 90}) translate(${y},0) rotate(${x < 180 ? 0 : 180})`;
   }
 });
