@@ -22,60 +22,26 @@ document.addEventListener("DOMContentLoaded", function () {
 
   let tableauWorksheet = null;
 
-  // ✅ Check if running inside Tableau
-  if (typeof tableau !== "undefined" && tableau.extensions) {
-    console.log("✅ Running inside Tableau.");
-    tableau.extensions.initializeAsync().then(() => {
-      const dashboard = tableau.extensions.dashboardContent.dashboard;
-      tableauWorksheet = dashboard.worksheets.find(ws => ws.name === "Sheet1"); // Update with your sheet name
-
-      // ✅ Fetch data from Tableau and render the chart
-      getDataFromTableau();
-
-      // ✅ Listen for Tableau filter changes
-      tableauWorksheet.addEventListener(tableau.TableauEventType.FilterChanged, event => {
-        console.log("🎯 Tableau filter detected:", event);
-        getDataFromTableau();
-      });
-    }).catch(error => console.error("❌ Error initializing Tableau API:", error));
-  } else {
-    console.warn("⚠️ Not running inside Tableau. Loading standalone mode.");
-    getDataFromCSV();
-  }
-
-  function getDataFromTableau() {
-    tableauWorksheet.getSummaryDataAsync().then(data => {
-      let parsed = data.data.map(row => ({
-        generation: row[0].formattedValue,
-        occupation: row[1].formattedValue,
-        value: parseInt(row[2].formattedValue.replace(/,/g, "")) || 0
-      }));
-
-      console.log("📊 Data from Tableau:", parsed);
-      drawSunburst(buildHierarchy(parsed));
-    });
-  }
-
+  // ✅ Attach getDataFromCSV to window for global access
   window.getDataFromCSV = function () {
     d3.csv("https://amandarae220.github.io/emsi-sunburst/data.csv").then(rawData => {
-      console.log("📊 Data from CSV Loaded:", rawData); // Add this log
+      console.log("📊 Data from CSV Loaded:", rawData);
       let parsed = rawData.map(d => ({
         generation: d["Generation"],
         occupation: d["Occupation"],
         value: +d["2013 Jobs"].replace(/,/g, "")
       }));
-
-      console.log("📊 Data from CSV:", parsed);
       drawSunburst(buildHierarchy(parsed));
     }).catch(error => console.error("❌ Error loading CSV:", error));
-  }
+  };
 
-  function buildHierarchy(csvData) {
+  // ✅ Attach buildHierarchy globally
+  window.buildHierarchy = function (csvData) {
     const map = new Map();
     csvData.forEach(d => {
       if (!map.has(d.generation)) { map.set(d.generation, new Map()); }
       const occMap = map.get(d.generation);
-      occMap.set(d.occupation, (occMap.get(d.occupation) || 0) + d.value);
+      occMap.set(d.occupation, (occMap.get(occ) || 0) + d.value);
     });
 
     return {
@@ -85,9 +51,10 @@ document.addEventListener("DOMContentLoaded", function () {
         children: [...occMap.entries()].map(([occ, val]) => ({ name: occ, value: val }))
       }))
     };
-  }
+  };
 
-  function drawSunburst(dataHierarchy) {
+  // ✅ Attach drawSunburst globally
+  window.drawSunburst = function (dataHierarchy) {
     svg.selectAll("*").remove();
 
     const root = d3.partition().size([2 * Math.PI, radius])
@@ -164,18 +131,57 @@ document.addEventListener("DOMContentLoaded", function () {
         .attr("opacity", d => d.depth === 1 ? 1 : 0)
         .attrTween("transform", d => () => labelTransform(d.current));
     }
-  }
+  };
 
-  function applyFilterToTableau(generation) {
+  // ✅ Apply Filter to Tableau
+  window.applyFilterToTableau = function (generation) {
     if (tableauWorksheet) {
       tableauWorksheet.applyFilterAsync("Generation", generation, tableau.FilterUpdateType.Replace)
         .catch(error => console.error("❌ Error applying Tableau filter:", error));
     }
-  }
+  };
 
-  function labelTransform(d) {
+  // ✅ Attach labelTransform globally
+  window.labelTransform = function (d) {
     const x = (d.x0 + d.x1) / 2 * 180 / Math.PI;
     const y = (d.y0 + d.y1) / 2 * radius;
     return `rotate(${x - 90}) translate(${y},0) rotate(${x < 180 ? 0 : 180})`;
+  };
+
+  // ✅ Initialize Tableau Extension or Load CSV
+  if (typeof tableau !== "undefined" && tableau.extensions) {
+    console.log("✅ Running inside Tableau.");
+    tableau.extensions.initializeAsync().then(() => {
+      const dashboard = tableau.extensions.dashboardContent.dashboard;
+      tableauWorksheet = dashboard.worksheets.find(ws => ws.name === "Sheet1");
+
+      tableauWorksheet.getSummaryDataAsync().then(data => {
+        let parsed = data.data.map(row => ({
+          generation: row[0].formattedValue,
+          occupation: row[1].formattedValue,
+          value: parseInt(row[2].formattedValue.replace(/,/g, "")) || 0
+        }));
+
+        console.log("📊 Data from Tableau:", parsed);
+        drawSunburst(buildHierarchy(parsed));
+      });
+
+      tableauWorksheet.addEventListener(tableau.TableauEventType.FilterChanged, event => {
+        console.log("🎯 Tableau filter detected:", event);
+        tableauWorksheet.getSummaryDataAsync().then(data => {
+          let parsed = data.data.map(row => ({
+            generation: row[0].formattedValue,
+            occupation: row[1].formattedValue,
+            value: parseInt(row[2].formattedValue.replace(/,/g, "")) || 0
+          }));
+
+          drawSunburst(buildHierarchy(parsed));
+        });
+      });
+
+    }).catch(error => console.error("❌ Error initializing Tableau API:", error));
+  } else {
+    console.warn("⚠️ Not running inside Tableau. Loading standalone mode.");
+    getDataFromCSV();
   }
 });
