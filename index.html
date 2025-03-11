@@ -2,176 +2,20 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Sunburst Chart – Tableau Interactive Filter</title>
-  <!-- Load d3.js v6 -->
+  <title>Tableau Sunburst Chart</title>
+  <!-- Load D3.js -->
   <script src="https://d3js.org/d3.v6.min.js"></script>
   <!-- Load Tableau Extensions API -->
   <script src="https://tableau.github.io/extensions-api/tableau.extensions.1.latest.js"></script>
+  <!-- Load Script -->
+  <script defer src="script.js"></script>
   <style>
-    body {
-      font-family: sans-serif;
-      margin: 20px;
-    }
-    .arc {
-      cursor: pointer;
-      stroke: #fff;
-      stroke-width: 1px;
-    }
-    .arc-label {
-      fill: white;
-      font-size: 10px;
-      text-anchor: middle;
-      pointer-events: none;
-    }
+    body { font-family: sans-serif; margin: 20px; }
+    .arc { cursor: pointer; stroke: #fff; stroke-width: 1px; }
+    .arc-label { fill: white; font-size: 10px; text-anchor: middle; pointer-events: none; }
   </style>
 </head>
 <body>
   <svg id="sunburst" width="928" height="928"></svg>
-
-  <script>
-    const width = 928, height = width, radius = width / 6;
-    const svg = d3.select("#sunburst")
-      .attr("viewBox", [-width/2, -height/2, width, width])
-      .style("font", "10px sans-serif");
-    
-    const color = d3.scaleOrdinal(d3.quantize(d3.interpolateRainbow, 11));
-    let tableauWorksheet = null;
-
-    // Initialize Tableau Extensions API and listen for filter changes
-    if (typeof tableau !== "undefined") {
-      tableau.extensions.initializeAsync().then(() => {
-        const dashboard = tableau.extensions.dashboardContent.dashboard;
-        tableauWorksheet = dashboard.worksheets.find(ws => ws.name === "Sheet1"); // Change to your worksheet name
-        
-        // Listen for Tableau filter changes
-        tableauWorksheet.addEventListener(tableau.TableauEventType.FilterChanged, event => {
-          console.log("Tableau filter changed:", event);
-          applyTableauFilter(event);
-        });
-      }).catch(error => console.error("Tableau API error:", error));
-    } else {
-      console.warn("Tableau Extensions API is not available. Running in test mode.");
-    }
-
-    // Function to filter the Sunburst chart based on Tableau filters
-    function applyTableauFilter(event) {
-      const appliedFilters = event.filters;
-      const generationFilter = appliedFilters.find(f => f.fieldName === "Generation");
-
-      if (generationFilter && generationFilter.appliedValues.length > 0) {
-        const selectedGenerations = generationFilter.appliedValues.map(d => d.value);
-        console.log("Filtering Sunburst to:", selectedGenerations);
-        loadDataAndRender(selectedGenerations);
-      }
-    }
-
-    // Load CSV data and apply filters if provided
-    function loadDataAndRender(selectedGenerations = null) {
-      d3.csv("https://amandarae220.github.io/emsi-sunburst/data.csv").then(rawData => {
-        let parsed = rawData.map(d => ({
-          generation: d["Generation"] || "Unknown",
-          occupation: d["Occupation"] || "Unknown",
-          value: +String(d["2013 Jobs"]).replace(/,/g, "")
-        }));
-
-        if (selectedGenerations) {
-          parsed = parsed.filter(d => selectedGenerations.includes(d.generation));
-        }
-
-        const hierarchyData = buildHierarchy(parsed);
-        drawSunburst(hierarchyData);
-      }).catch(error => console.error("Error loading data:", error));
-    }
-
-    // Build hierarchical data (group by Generation, then Occupation)
-    function buildHierarchy(csvData) {
-      const map = new Map();
-      csvData.forEach(d => {
-        const gen = d.generation;
-        const occ = d.occupation;
-        const value = d.value;
-        if (!map.has(gen)) { map.set(gen, new Map()); }
-        const occMap = map.get(gen);
-        occMap.set(occ, (occMap.get(occ) || 0) + value);
-      });
-
-      const root = { name: "All Jobs", children: [] };
-      map.forEach((occMap, gen) => {
-        const genNode = { name: gen, children: [] };
-        occMap.forEach((val, occ) => {
-          genNode.children.push({ name: occ, value: val });
-        });
-        root.children.push(genNode);
-      });
-
-      return root;
-    }
-
-    // Draw Sunburst Chart
-    function drawSunburst(dataHierarchy) {
-      svg.selectAll("*").remove();
-      const hierarchy = d3.hierarchy(dataHierarchy)
-          .sum(d => d.value)
-          .sort((a, b) => b.value - a.value);
-      const root = d3.partition()
-          .size([2 * Math.PI, hierarchy.height + 1])(hierarchy);
-      root.each(d => d.current = d);
-
-      const arcGen = d3.arc()
-          .startAngle(d => d.x0)
-          .endAngle(d => d.x1)
-          .padAngle(d => Math.min((d.x1 - d.x0) / 2, 0.005))
-          .padRadius(radius * 1.5)
-          .innerRadius(d => d.y0 * radius)
-          .outerRadius(d => Math.max(d.y0 * radius, d.y1 * radius - 1));
-
-      const path = svg.append("g")
-        .selectAll("g")
-        .data(root.descendants().slice(1))
-        .join("g")
-        .attr("class", "arc-group")
-        .append("path")
-        .attr("class", "arc")
-        .attr("d", d => arcGen(d.current))
-        .attr("fill", d => {
-          let cur = d;
-          while (cur.depth > 1) cur = cur.parent;
-          return color(cur.data.name);
-        })
-        .attr("pointer-events", "auto")
-        .on("click", function(event, d) {
-          if (d.depth === 1 && tableauWorksheet) {
-            tableauWorksheet.applyFilterAsync(
-              "Generation",
-              d.data.name,
-              tableau.FilterUpdateType.Replace
-            ).catch(error => console.error("Error applying Tableau filter:", error));
-          }
-        });
-
-      path.append("title")
-          .text(d => `${d.ancestors().map(d => d.data.name).reverse().join("/")}\n${d.value}`);
-
-      svg.append("g")
-        .selectAll("text")
-        .data(root.descendants().slice(1))
-        .join("text")
-        .attr("class", "arc-label")
-        .attr("dy", "0.35em")
-        .attr("fill-opacity", 1)
-        .attr("text-anchor", "middle")
-        .attr("transform", d => labelTransform(d.current))
-        .text(d => d.data.name);
-    }
-
-    function labelTransform(d) {
-      const x = (d.x0 + d.x1) / 2 * 180 / Math.PI;
-      const y = (d.y0 + d.y1) / 2 * radius;
-      return `rotate(${x - 90}) translate(${y},0) rotate(${x < 180 ? 0 : 180})`;
-    }
-
-    // Start rendering
-    loadDataAndRender();
-  </script>
 </body>
 </html>
