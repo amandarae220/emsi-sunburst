@@ -6,23 +6,11 @@ document.addEventListener("DOMContentLoaded", function () {
     .attr("viewBox", [-width / 2, -height / 2, width, width])
     .style("font", "10px sans-serif");
 
-  const tooltip = d3.select("body")
-    .append("div")
-    .attr("class", "tooltip")
-    .style("position", "absolute")
-    .style("text-align", "center")
-    .style("padding", "6px")
-    .style("font", "12px sans-serif")
-    .style("background", "lightsteelblue")
-    .style("border-radius", "4px")
-    .style("pointer-events", "none")
-    .style("opacity", 0);
-
   const color = d3.scaleOrdinal(d3.quantize(d3.interpolateRainbow, 11));
 
   let tableauWorksheet = null;
 
-  // ✅ Attach getDataFromCSV to window for global access
+  // ✅ Fetch Data from CSV (For Standalone Mode)
   window.getDataFromCSV = function () {
     d3.csv("https://amandarae220.github.io/emsi-sunburst/data.csv").then(rawData => {
       console.log("📊 Data from CSV Loaded:", rawData);
@@ -35,7 +23,7 @@ document.addEventListener("DOMContentLoaded", function () {
     }).catch(error => console.error("❌ Error loading CSV:", error));
   };
 
-  // ✅ Attach buildHierarchy globally
+  // ✅ Convert Flat Data to Hierarchical Structure for D3 Sunburst
   window.buildHierarchy = function (csvData) {
     const map = new Map();
     csvData.forEach(d => {
@@ -53,7 +41,7 @@ document.addEventListener("DOMContentLoaded", function () {
     };
   };
 
-  // ✅ Attach drawSunburst globally
+  // ✅ Draw Sunburst Chart
   window.drawSunburst = function (dataHierarchy) {
     svg.selectAll("*").remove();
 
@@ -78,74 +66,22 @@ document.addEventListener("DOMContentLoaded", function () {
       .attr("fill", d => color(d.ancestors().map(d => d.data.name).reverse().join("/")))
       .attr("fill-opacity", d => d.depth === 1 ? 0.8 : 0.6)
       .style("cursor", "pointer")
-      .on("mouseover", function (event, d) {
-        tooltip.style("opacity", 1)
-          .html(`${d.data.name}<br>${d.value}`)
-          .style("left", (event.pageX + 10) + "px")
-          .style("top", (event.pageY - 10) + "px");
-      })
-      .on("mouseout", function () {
-        tooltip.style("opacity", 0);
-      })
       .on("click", function (event, d) {
         if (d.depth === 1) { // 🎯 Only allow filtering on Generations
           console.log(`🔍 Filtering Tableau by Generation: ${d.data.name}`);
           applyFilterToTableau(d.data.name);
-          clicked(event, d);
         }
       });
 
     path.append("title").text(d => `${d.data.name}\n${d.value}`);
-
-    // ✅ Add Labels
-    svg.append("g").selectAll("text")
-      .data(root.descendants().slice(1))
-      .join("text")
-      .attr("transform", d => labelTransform(d))
-      .attr("text-anchor", "middle")
-      .attr("fill", "#fff")
-      .attr("font-size", "12px")
-      .attr("opacity", d => d.depth === 1 ? 1 : 0)
-      .text(d => d.data.name);
-
-    function clicked(event, p) {
-      if (p.depth > 1) return;
-
-      root.each(d => d.target = {
-        x0: Math.max(0, Math.min(1, (d.x0 - p.x0) / (p.x1 - p.x0))) * 2 * Math.PI,
-        x1: Math.max(0, Math.min(1, (d.x1 - p.x0) / (p.x1 - p.x0))) * 2 * Math.PI,
-        y0: Math.max(0, d.y0 - p.depth),
-        y1: Math.max(0, d.y1 - p.depth)
-      });
-
-      const t = svg.transition().duration(750);
-
-      path.transition(t)
-        .tween("data", d => {
-          const i = d3.interpolate(d.current, d.target);
-          return t => d.current = i(t);
-        })
-        .attrTween("d", d => () => arc(d.current));
-
-      svg.selectAll("text").transition(t)
-        .attr("opacity", d => d.depth === 1 ? 1 : 0)
-        .attrTween("transform", d => () => labelTransform(d.current));
-    }
   };
 
-  // ✅ Apply Filter to Tableau
+  // ✅ Apply Filter to Tableau When Clicking Sunburst
   window.applyFilterToTableau = function (generation) {
     if (tableauWorksheet) {
       tableauWorksheet.applyFilterAsync("Generation", generation, tableau.FilterUpdateType.Replace)
         .catch(error => console.error("❌ Error applying Tableau filter:", error));
     }
-  };
-
-  // ✅ Attach labelTransform globally
-  window.labelTransform = function (d) {
-    const x = (d.x0 + d.x1) / 2 * 180 / Math.PI;
-    const y = (d.y0 + d.y1) / 2 * radius;
-    return `rotate(${x - 90}) translate(${y},0) rotate(${x < 180 ? 0 : 180})`;
   };
 
   // ✅ Initialize Tableau Extension or Load CSV
