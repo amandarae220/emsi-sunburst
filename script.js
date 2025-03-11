@@ -56,7 +56,7 @@ document.addEventListener("DOMContentLoaded", function () {
     });
   }
 
-  function getDataFromCSV() {
+  window.getDataFromCSV = function () {
     d3.csv("https://amandarae220.github.io/emsi-sunburst/data.csv").then(rawData => {
       console.log("📊 Data from CSV Loaded:", rawData); // Add this log
       let parsed = rawData.map(d => ({
