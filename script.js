@@ -33,9 +33,9 @@ document.addEventListener("DOMContentLoaded", function () {
   function getDataAndRender() {
     tableauWorksheet.getSummaryDataAsync().then(data => {
       let parsed = data.data.map(row => ({
-        generation: row[0].formattedValue,
-        occupation: row[1].formattedValue,
-        value: parseInt(row[2].formattedValue.replace(/,/g, "")) || 0
+        generation: row[3].formattedValue,
+        occupation: row[2].formattedValue,
+        value: parseInt(row[4].formattedValue.replace(/,/g, "")) || 0
       }));
 
       console.log("📊 Data from Tableau:", parsed);
